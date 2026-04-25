@@ -115,6 +115,10 @@ impl ShaderPairAgal {
                 // We include slots that are either currently bound OR referenced by the shader.
                 // For bound slots, use the bound texture's dimension.
                 // For unbound-but-used slots, fall back to the shader's declared dimension.
+                //
+                // `used_texture_slots[i]` records the dimension for every slot referenced by
+                // the shader (bound or not), so `rebuild_pipeline` can add dummy bindings for
+                // the unbound ones.
                 let mut used_texture_slots = [None; 8];
                 for i in 0..8usize {
                     let dimension = if let Some(texture_info) = data.texture_infos[i] {
@@ -122,6 +126,10 @@ impl ShaderPairAgal {
                             ShaderTextureInfo::D2 => wgpu::TextureViewDimension::D2,
                             ShaderTextureInfo::Cube => wgpu::TextureViewDimension::Cube,
                         };
+                        // Record all shader-referenced slots (bound and unbound alike).
+                        if let Some(shader_dim) = shader_texture_dims[i] {
+                            used_texture_slots[i] = Some(shader_dim);
+                        }
                         Some(dim)
                     } else if let Some(shader_dim) = shader_texture_dims[i] {
                         // Slot is referenced by the shader but not currently bound.

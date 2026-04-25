@@ -452,20 +452,28 @@ impl CurrentPipeline {
 
         // For texture slots that the shader references but have no texture bound, add dummy
         // bindings so the bind group matches the pipeline layout (which now includes those slots).
+        // For texture slots that the shader references but have no texture bound, add dummy
+        // bindings so the bind group matches the pipeline layout (which now includes those slots).
         for (i, slot_dim) in compiled_shaders.used_texture_slots.iter().enumerate() {
             if let Some(dim) = slot_dim {
-                let dummy_view = match dim {
-                    naga_agal::Dimension::TwoD => &self.dummy_texture_view_2d,
-                    naga_agal::Dimension::Cube => &self.dummy_texture_view_cube,
-                };
-                bind_group_entries.push(BindGroupEntry {
-                    binding: naga_agal::TEXTURE_START_BIND_INDEX + i as u32,
-                    resource: BindingResource::TextureView(dummy_view),
-                });
-                bind_group_entries.push(BindGroupEntry {
-                    binding: naga_agal::TEXTURE_SAMPLER_START_BIND_INDEX + i as u32,
-                    resource: BindingResource::Sampler(&descriptors.bitmap_samplers.clamp_nearest),
-                });
+                // Only add a dummy binding for slots that have no real texture bound.
+                // Slots with a real texture were already handled by the loop above.
+                if self.bound_textures[i].is_none() {
+                    let dummy_view = match dim {
+                        naga_agal::Dimension::TwoD => &self.dummy_texture_view_2d,
+                        naga_agal::Dimension::Cube => &self.dummy_texture_view_cube,
+                    };
+                    bind_group_entries.push(BindGroupEntry {
+                        binding: naga_agal::TEXTURE_START_BIND_INDEX + i as u32,
+                        resource: BindingResource::TextureView(dummy_view),
+                    });
+                    bind_group_entries.push(BindGroupEntry {
+                        binding: naga_agal::TEXTURE_SAMPLER_START_BIND_INDEX + i as u32,
+                        resource: BindingResource::Sampler(
+                            &descriptors.bitmap_samplers.clamp_nearest,
+                        ),
+                    });
+                }
             }
         }
 
