@@ -125,6 +125,17 @@ pub struct CurrentPipeline {
     // (which allows rendering with an 'ignoresampler' tex opcode,
     // and no calls to Context3D.setSamplerStateAt)
     sampler_configs: [SamplerConfig; 8],
+
+    // Dummy 1×1 textures used as placeholders when a shader references a texture slot
+    // that has no texture currently bound. Without these, pipeline creation would fail
+    // with a wgpu validation error about missing shader bindings.
+    // The texture objects themselves are kept alive here so the views remain valid.
+    #[allow(dead_code)]
+    dummy_texture_2d: wgpu::Texture,
+    dummy_texture_view_2d: wgpu::TextureView,
+    #[allow(dead_code)]
+    dummy_texture_cube: wgpu::Texture,
+    dummy_texture_view_cube: wgpu::TextureView,
 }
 
 #[derive(Clone)]
@@ -151,6 +162,44 @@ impl CurrentPipeline {
             size: FRAGMENT_SHADER_UNIFORMS_BUFFER_SIZE,
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
+        });
+
+        let dummy_texture_2d = descriptors.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Context3D dummy 2D texture"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let dummy_texture_view_2d = dummy_texture_2d.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2),
+            ..Default::default()
+        });
+
+        let dummy_texture_cube = descriptors.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Context3D dummy cube texture"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 6,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let dummy_texture_view_cube = dummy_texture_cube.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::Cube),
+            ..Default::default()
         });
 
         CurrentPipeline {
@@ -183,6 +232,11 @@ impl CurrentPipeline {
             target_format: TextureFormat::Rgba8Unorm,
 
             sampler_configs: [SamplerConfig::default(); 8],
+
+            dummy_texture_2d,
+            dummy_texture_view_2d,
+            dummy_texture_cube,
+            dummy_texture_view_cube,
         }
     }
 
@@ -395,6 +449,25 @@ impl CurrentPipeline {
                 texture_infos,
             },
         );
+
+        // For texture slots that the shader references but have no texture bound, add dummy
+        // bindings so the bind group matches the pipeline layout (which now includes those slots).
+        for (i, slot_dim) in compiled_shaders.used_texture_slots.iter().enumerate() {
+            if let Some(dim) = slot_dim {
+                let dummy_view = match dim {
+                    naga_agal::Dimension::TwoD => &self.dummy_texture_view_2d,
+                    naga_agal::Dimension::Cube => &self.dummy_texture_view_cube,
+                };
+                bind_group_entries.push(BindGroupEntry {
+                    binding: naga_agal::TEXTURE_START_BIND_INDEX + i as u32,
+                    resource: BindingResource::TextureView(dummy_view),
+                });
+                bind_group_entries.push(BindGroupEntry {
+                    binding: naga_agal::TEXTURE_SAMPLER_START_BIND_INDEX + i as u32,
+                    resource: BindingResource::Sampler(&descriptors.bitmap_samplers.clamp_nearest),
+                });
+            }
+        }
 
         let pipeline_layout_label = create_debug_label!("Pipeline layout");
         let pipeline_layout =

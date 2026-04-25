@@ -466,6 +466,23 @@ impl<'a> NagaBuilder<'a> {
         Ok(sampler_configs)
     }
 
+    /// Returns which texture slots are used by the shader and their dimensions.
+    /// `None` means the slot is not referenced; `Some(Dimension)` indicates usage.
+    pub fn used_texture_dimensions(
+        parsed: &ParsedBytecode,
+    ) -> [Option<Dimension>; MAX_TEXTURES] {
+        let mut dims = [None; MAX_TEXTURES];
+        for (_opcode, _dest, _source1, source2) in &parsed.operations {
+            if let Source2::Sampler(sampler_field) = source2 {
+                let index = sampler_field.reg_num as usize;
+                if index < MAX_TEXTURES {
+                    dims[index] = Some(sampler_field.dimension);
+                }
+            }
+        }
+        dims
+    }
+
     // We're passing the reference along anyway.
     #[allow(clippy::trivially_copy_pass_by_ref)]
     pub fn build_module(

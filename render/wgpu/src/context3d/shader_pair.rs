@@ -28,6 +28,9 @@ pub struct CompiledShaderProgram {
     pub vertex_module: wgpu::ShaderModule,
     pub fragment_module: wgpu::ShaderModule,
     pub bind_group_layout: wgpu::BindGroupLayout,
+    /// Which texture slots are referenced by the fragment shader, and their expected dimension.
+    /// `None` means the slot is not used by the shader.
+    pub used_texture_slots: [Option<naga_agal::Dimension>; 8],
 }
 
 impl ShaderPairAgal {
@@ -54,6 +57,10 @@ impl ShaderPairAgal {
         descriptors: &Descriptors,
         data: ShaderCompileData,
     ) -> RefMut<'_, CompiledShaderProgram> {
+        // Compute which texture slots the fragment shader references and their expected dimensions.
+        // This must be done before borrowing `self.compiled` to avoid a borrow conflict.
+        let shader_texture_dims = naga_agal::used_texture_dimensions(&self.fragment_shader);
+
         let compiled = self.compiled.borrow_mut();
         RefMut::map(compiled, |compiled| {
             // TODO: Figure out a way to avoid the clone when we have a cache hit
@@ -104,12 +111,32 @@ impl ShaderPairAgal {
                     },
                 ];
 
-                for (i, texture_info) in data.texture_infos.iter().enumerate() {
-                    if let Some(texture_info) = texture_info {
-                        let dimension = match texture_info {
+                // Build a combined view of which texture slots need a layout entry.
+                // We include slots that are either currently bound OR referenced by the shader.
+                // For bound slots, use the bound texture's dimension.
+                // For unbound-but-used slots, fall back to the shader's declared dimension.
+                let mut used_texture_slots = [None; 8];
+                for i in 0..8usize {
+                    let dimension = if let Some(texture_info) = data.texture_infos[i] {
+                        let dim = match texture_info {
                             ShaderTextureInfo::D2 => wgpu::TextureViewDimension::D2,
                             ShaderTextureInfo::Cube => wgpu::TextureViewDimension::Cube,
                         };
+                        Some(dim)
+                    } else if let Some(shader_dim) = shader_texture_dims[i] {
+                        // Slot is referenced by the shader but not currently bound.
+                        // Provide a placeholder layout entry so pipeline creation succeeds.
+                        used_texture_slots[i] = Some(shader_dim);
+                        let dim = match shader_dim {
+                            naga_agal::Dimension::TwoD => wgpu::TextureViewDimension::D2,
+                            naga_agal::Dimension::Cube => wgpu::TextureViewDimension::Cube,
+                        };
+                        Some(dim)
+                    } else {
+                        None
+                    };
+
+                    if let Some(dimension) = dimension {
                         layout_entries.push(wgpu::BindGroupLayoutEntry {
                             binding: naga_agal::TEXTURE_START_BIND_INDEX + i as u32,
                             visibility: wgpu::ShaderStages::FRAGMENT,
@@ -142,6 +169,7 @@ impl ShaderPairAgal {
                     vertex_module,
                     fragment_module,
                     bind_group_layout,
+                    used_texture_slots,
                 }
             })
         })

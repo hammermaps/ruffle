@@ -121,8 +121,10 @@ impl Display for ShaderType {
     }
 }
 
-pub use builder::{ParsedBytecode, TEXTURE_SAMPLER_START_BIND_INDEX, TEXTURE_START_BIND_INDEX};
-pub use types::{Filter, Mipmap, SamplerConfig, Wrapping};
+pub use builder::{
+    ParsedBytecode, TEXTURE_SAMPLER_START_BIND_INDEX, TEXTURE_START_BIND_INDEX,
+};
+pub use types::{Dimension, Filter, Mipmap, SamplerConfig, Wrapping};
 
 /// Compiles an Adobe AGAL shader to a Naga Module.
 ///
@@ -180,4 +182,12 @@ pub fn extract_sampler_configs(
     parsed: &ParsedBytecode,
 ) -> Result<[Option<SamplerConfig>; MAX_TEXTURES], AgalError> {
     NagaBuilder::extract_sampler_configs(parsed)
+}
+
+/// Returns which texture slots are used by the shader and their dimensions.
+/// `None` means the slot is not referenced; `Some(Dimension)` indicates usage.
+pub fn used_texture_dimensions(
+    parsed: &ParsedBytecode,
+) -> [Option<Dimension>; MAX_TEXTURES] {
+    NagaBuilder::used_texture_dimensions(parsed)
 }
